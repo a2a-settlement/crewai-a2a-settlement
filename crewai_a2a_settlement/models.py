@@ -8,6 +8,7 @@ agents, and crew. Keeping them in one file avoids circular imports.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Optional
 
 
 @dataclass
@@ -80,3 +81,35 @@ class SessionSummary:
                     f"status={result_status}"
                 )
         return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Negotiation transcript models
+# ---------------------------------------------------------------------------
+
+@dataclass
+class NegotiationEntry:
+    """A single turn in the negotiation dialogue between agents."""
+    speaker: str
+    role: str
+    message: str
+    timestamp: str
+    metadata: Optional[dict] = field(default_factory=dict)
+
+
+@dataclass
+class NegotiationTranscript:
+    """
+    Immutable record of a negotiation between agents.
+
+    Agents produce this as their final output instead of executing settlements.
+    The transcript is hashed (SHA-256) so downstream mediators can verify
+    integrity before authorizing any settlement.
+    """
+    session_id: str
+    participants: list[str]
+    entries: list[NegotiationEntry] = field(default_factory=list)
+    compromise: dict = field(default_factory=dict)
+    created_at: str = ""
+    transcript_hash: str = ""
+    transcript_json: str = ""
