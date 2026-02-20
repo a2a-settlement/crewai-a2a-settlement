@@ -12,6 +12,7 @@ Public API:
     A2ANetworkError          — Transient network failures
     EscrowReceipt            — Locked-funds receipt
     SettlementResult         — Release/cancel confirmation
+    BatchSettlementResult    — Aggregated batch-release result
     SessionSummary           — Aggregated session metrics
     AgentRegistration        — Agent registration result
     NegotiationEntry         — Single dialogue turn in a negotiation
@@ -38,6 +39,7 @@ from .client import (
 from .config import A2AConfig
 from .models import (
     AgentRegistration,
+    BatchSettlementResult,
     EscrowReceipt,
     NegotiationEntry,
     NegotiationTranscript,
@@ -64,6 +66,7 @@ __all__ = [
     "A2ARegistrationError",
     "A2ANetworkError",
     "AgentRegistration",
+    "BatchSettlementResult",
     "EscrowReceipt",
     "SettlementResult",
     "SessionSummary",

@@ -23,7 +23,7 @@ from typing import Optional
 import httpx
 
 from .config import A2AConfig
-from .models import EscrowReceipt, SessionSummary, SettlementResult
+from .models import BatchSettlementResult, EscrowReceipt, SessionSummary, SettlementResult
 
 logger = logging.getLogger("crewai_a2a_settlement.client")
 
@@ -128,6 +128,7 @@ class A2ASettlementClient:
         # Track every escrow created this session for the settlement summary
         self._session_receipts: list[EscrowReceipt] = []
         self._session_results: list[SettlementResult] = []
+        self._pending_releases: list[str] = []
         logger.info(
             "A2ASettlementClient initialized: exchange=%s network=%s",
             config.exchange_url,
@@ -298,13 +299,27 @@ class A2ASettlementClient:
         """
         Release escrowed funds to the payee. Call this on task success.
 
+        When ``batch_settlements`` is enabled in config, the release is
+        deferred to a pending bucket and a placeholder result with
+        status ``"deferred"`` is returned. Call :meth:`flush_settlements`
+        to execute all pending releases in a single batch transaction.
+
         Returns:
-            SettlementResult with tx_hash confirming the transfer.
+            SettlementResult with tx_hash confirming the transfer, or a
+            deferred placeholder when batching is active.
 
         Raises:
             A2AReleaseError:  Escrow not found, already settled, etc.
             A2ANetworkError:  Exchange unreachable after retries.
         """
+        if self._config.batch_settlements:
+            self.defer_release(escrow_id)
+            return SettlementResult(
+                escrow_id=escrow_id,
+                status="deferred",
+                tx_hash="",
+                settled_at="",
+            )
 
         def _call():
             resp = self._http.post(f"/v1/escrow/{escrow_id}/release")
@@ -372,6 +387,96 @@ class A2ASettlementClient:
         self._session_results.append(result)
         logger.info("Escrow cancelled: id=%s reason=%s", escrow_id, reason or "(none)")
         return result
+
+    # ------------------------------------------------------------------
+    # Batch settlement
+    # ------------------------------------------------------------------
+
+    def defer_release(self, escrow_id: str) -> None:
+        """
+        Add an escrow to the pending-release bucket without calling the
+        exchange. Use :meth:`flush_settlements` to release them all in
+        one batch transaction.
+        """
+        self._pending_releases.append(escrow_id)
+        logger.info("Escrow deferred for batch release: id=%s", escrow_id)
+
+    def flush_settlements(self) -> BatchSettlementResult:
+        """
+        Release all pending escrows in a single batch API call.
+
+        Returns an empty :class:`BatchSettlementResult` (no API call)
+        when the pending bucket is empty.
+
+        Raises:
+            A2AReleaseError:  Batch release rejected by the exchange.
+            A2ANetworkError:  Exchange unreachable after retries.
+        """
+        if not self._pending_releases:
+            return BatchSettlementResult()
+
+        escrow_ids = list(self._pending_releases)
+        payload = {"escrow_ids": escrow_ids}
+
+        def _call():
+            resp = self._http.post("/v1/escrow/batch-release", json=payload)
+            _raise_for_status(resp, "batch-release", validation_error_class=A2AReleaseError)
+            return resp.json()
+
+        try:
+            data = _with_retries(_call, label="batch-release")
+        except (A2ANetworkError, A2ASettlementError):
+            raise
+        except Exception as exc:
+            raise A2AReleaseError(
+                f"Unexpected error in batch release: {exc}"
+            ) from exc
+
+        failed_ids = set(data.get("failed_escrow_ids", []))
+        batch_tx_hash = data.get("batch_tx_hash", "")
+        settled_at = data.get("settled_at", "")
+        results: list[SettlementResult] = []
+
+        receipt_amounts = {r.escrow_id: r.amount for r in self._session_receipts}
+
+        for eid in escrow_ids:
+            if eid in failed_ids:
+                continue
+            result = SettlementResult(
+                escrow_id=eid,
+                status="released",
+                tx_hash=batch_tx_hash,
+                settled_at=settled_at,
+            )
+            results.append(result)
+            self._session_results.append(result)
+
+        total_released = sum(receipt_amounts.get(r.escrow_id, 0.0) for r in results)
+
+        self._pending_releases.clear()
+
+        batch_result = BatchSettlementResult(
+            results=results,
+            batch_tx_hash=batch_tx_hash,
+            settled_at=settled_at,
+            total_released=total_released,
+            escrow_count=len(results),
+            failed_escrow_ids=list(failed_ids),
+        )
+
+        logger.info(
+            "Batch settlement complete: released=%d failed=%d tx=%s",
+            len(results), len(failed_ids), batch_tx_hash,
+        )
+        return batch_result
+
+    def get_pending_count(self) -> int:
+        """Return the number of escrows awaiting batch release."""
+        return len(self._pending_releases)
+
+    def get_pending_escrow_ids(self) -> list[str]:
+        """Return a copy of the pending-release escrow IDs."""
+        return list(self._pending_releases)
 
     # ------------------------------------------------------------------
     # Status and account queries

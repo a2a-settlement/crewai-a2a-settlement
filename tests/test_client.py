@@ -880,3 +880,191 @@ class TestConfig:
     def test_valid_timeout(self):
         config = A2AConfig(api_key="key", timeout_seconds=60)
         assert config.timeout_seconds == 60
+
+    def test_batch_settlements_default_false(self):
+        config = A2AConfig(api_key="key")
+        assert config.batch_settlements is False
+
+    def test_batch_settlements_enabled(self):
+        config = A2AConfig(api_key="key", batch_settlements=True)
+        assert config.batch_settlements is True
+
+
+# ---------------------------------------------------------------------------
+# 13. Batch settlement
+# ---------------------------------------------------------------------------
+
+BATCH_RELEASE_OK = {
+    "batch_tx_hash": "0xBATCHTX",
+    "settled_at": "2026-02-18T12:05:00Z",
+    "failed_escrow_ids": [],
+}
+
+
+def _make_batch_client(transport: MockTransport) -> A2ASettlementClient:
+    """Build a test client with batch_settlements enabled."""
+    http = httpx.Client(transport=transport, base_url="https://test")
+    config = A2AConfig(
+        api_key="test-key",
+        exchange_url="https://test",
+        network="sandbox",
+        batch_settlements=True,
+    )
+    return A2ASettlementClient(config, http_client=http)
+
+
+class TestBatchSettlement:
+
+    def setup_method(self):
+        A2ASettlementClient._clear_instance()
+
+    def teardown_method(self):
+        A2ASettlementClient._clear_instance()
+
+    def test_release_defers_when_batch_mode_enabled(self):
+        transport = MockTransport()
+        client = _make_batch_client(transport)
+
+        result = client.release("esc-001")
+        assert result.status == "deferred"
+        assert result.escrow_id == "esc-001"
+        assert result.tx_hash == ""
+        assert client.get_pending_count() == 1
+
+    def test_release_immediate_when_batch_mode_disabled(self):
+        transport = MockTransport()
+        transport.add(("POST", "/v1/escrow/esc-001/release"), 200, RELEASE_OK)
+        client = _make_client(transport)
+
+        result = client.release("esc-001")
+        assert result.status == "released"
+        assert result.tx_hash == "0xTXHASH"
+        assert client.get_pending_count() == 0
+
+    def test_defer_release_adds_to_pending(self):
+        transport = MockTransport()
+        client = _make_client(transport)
+
+        client.defer_release("esc-001")
+        client.defer_release("esc-002")
+        assert client.get_pending_count() == 2
+        assert client.get_pending_escrow_ids() == ["esc-001", "esc-002"]
+
+    def test_flush_settlements_sends_batch_request(self):
+        transport = MockTransport()
+        transport.add(("POST", "/v1/escrow"), 200, {"escrow_id": "esc-001", "created_at": ""})
+        transport.add(("POST", "/v1/escrow"), 200, {"escrow_id": "esc-002", "created_at": ""})
+        transport.add(("POST", "/v1/escrow/batch-release"), 200, BATCH_RELEASE_OK)
+        client = _make_batch_client(transport)
+
+        client.escrow("0xP", "0xQ", 5.0, "task-1")
+        client.escrow("0xP", "0xR", 3.0, "task-2")
+        client.release("esc-001")
+        client.release("esc-002")
+
+        batch = client.flush_settlements()
+        assert batch.batch_tx_hash == "0xBATCHTX"
+        assert batch.escrow_count == 2
+        assert batch.total_released == 8.0
+        assert batch.failed_escrow_ids == []
+
+    def test_flush_settlements_empty_bucket_is_noop(self):
+        transport = MockTransport()
+        client = _make_client(transport)
+
+        batch = client.flush_settlements()
+        assert batch.escrow_count == 0
+        assert batch.results == []
+        assert batch.batch_tx_hash == ""
+
+    def test_flush_settlements_clears_pending_bucket(self):
+        transport = MockTransport()
+        transport.add(("POST", "/v1/escrow"), 200, {"escrow_id": "esc-001", "created_at": ""})
+        transport.add(("POST", "/v1/escrow/batch-release"), 200, BATCH_RELEASE_OK)
+        client = _make_batch_client(transport)
+
+        client.escrow("0xP", "0xQ", 5.0, "task-1")
+        client.release("esc-001")
+        assert client.get_pending_count() == 1
+
+        client.flush_settlements()
+        assert client.get_pending_count() == 0
+
+    def test_flush_settlements_updates_session_results(self):
+        transport = MockTransport()
+        transport.add(("POST", "/v1/escrow"), 200, {"escrow_id": "esc-001", "created_at": ""})
+        transport.add(("POST", "/v1/escrow/batch-release"), 200, BATCH_RELEASE_OK)
+        client = _make_batch_client(transport)
+
+        client.escrow("0xP", "0xQ", 5.0, "task-1")
+        client.release("esc-001")
+        client.flush_settlements()
+
+        assert len(client._session_results) == 1
+        assert client._session_results[0].status == "released"
+        assert client._session_results[0].tx_hash == "0xBATCHTX"
+
+    def test_flush_settlements_partial_failure(self):
+        partial_response = {
+            "batch_tx_hash": "0xPARTIAL",
+            "settled_at": "2026-02-18T12:05:00Z",
+            "failed_escrow_ids": ["esc-002"],
+        }
+        transport = MockTransport()
+        transport.add(("POST", "/v1/escrow"), 200, {"escrow_id": "esc-001", "created_at": ""})
+        transport.add(("POST", "/v1/escrow"), 200, {"escrow_id": "esc-002", "created_at": ""})
+        transport.add(("POST", "/v1/escrow/batch-release"), 200, partial_response)
+        client = _make_batch_client(transport)
+
+        client.escrow("0xP", "0xQ", 5.0, "task-1")
+        client.escrow("0xP", "0xR", 3.0, "task-2")
+        client.defer_release("esc-001")
+        client.defer_release("esc-002")
+
+        batch = client.flush_settlements()
+        assert batch.escrow_count == 1
+        assert batch.failed_escrow_ids == ["esc-002"]
+        assert batch.total_released == 5.0
+
+    def test_get_pending_count(self):
+        transport = MockTransport()
+        client = _make_client(transport)
+
+        assert client.get_pending_count() == 0
+        client.defer_release("esc-001")
+        assert client.get_pending_count() == 1
+        client.defer_release("esc-002")
+        assert client.get_pending_count() == 2
+
+    def test_cancel_not_batched_in_batch_mode(self):
+        transport = MockTransport()
+        transport.add(("POST", "/v1/escrow/esc-001/cancel"), 200, CANCEL_OK)
+        client = _make_batch_client(transport)
+
+        result = client.cancel("esc-001", reason="Task failed")
+        assert result.status == "cancelled"
+        assert client.get_pending_count() == 0
+
+    def test_batch_then_session_summary_correct(self):
+        transport = MockTransport()
+        transport.add(("POST", "/v1/escrow"), 200, {"escrow_id": "esc-001", "created_at": ""})
+        transport.add(("POST", "/v1/escrow"), 200, {"escrow_id": "esc-002", "created_at": ""})
+        transport.add(("POST", "/v1/escrow"), 200, {"escrow_id": "esc-003", "created_at": ""})
+        transport.add(("POST", "/v1/escrow/esc-003/cancel"), 200, CANCEL_OK)
+        transport.add(("POST", "/v1/escrow/batch-release"), 200, BATCH_RELEASE_OK)
+        client = _make_batch_client(transport)
+
+        client.escrow("0xP", "0xQ", 5.0, "task-1")
+        client.escrow("0xP", "0xR", 3.0, "task-2")
+        client.escrow("0xP", "0xS", 2.0, "task-3")
+
+        client.release("esc-001")
+        client.release("esc-002")
+        client.cancel("esc-003", reason="Task 3 failed")
+        client.flush_settlements()
+
+        summary = client.get_session_receipts()
+        assert summary.total_escrowed == 10.0
+        assert summary.total_released == 8.0
+        assert summary.total_cancelled == 2.0
+        assert summary.cancelled_count == 1

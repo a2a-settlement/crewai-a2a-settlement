@@ -20,6 +20,7 @@ class A2AConfig(BaseModel):
         A2ASE_NETWORK       — "sandbox" or "mainnet" (default: sandbox)
         A2ASE_TIMEOUT       — HTTP timeout in seconds (default: 30)
         A2ASE_AUTO_REGISTER — auto-register agents at kickoff (default: true)
+        A2ASE_BATCH_SETTLEMENTS — defer releases for batch flush (default: false)
     """
 
     exchange_url: str = os.getenv(
@@ -29,6 +30,7 @@ class A2AConfig(BaseModel):
     network: str = os.getenv("A2ASE_NETWORK", "sandbox")
     timeout_seconds: int = int(os.getenv("A2ASE_TIMEOUT", "30"))
     auto_register: bool = os.getenv("A2ASE_AUTO_REGISTER", "true").lower() == "true"
+    batch_settlements: bool = os.getenv("A2ASE_BATCH_SETTLEMENTS", "false").lower() == "true"
 
     @field_validator("network")
     @classmethod

@@ -83,6 +83,17 @@ class SessionSummary:
         return "\n".join(lines)
 
 
+@dataclass
+class BatchSettlementResult:
+    """Result of a batch settlement (multiple escrows released in one call)."""
+    results: list[SettlementResult] = field(default_factory=list)
+    batch_tx_hash: str = ""
+    settled_at: str = ""
+    total_released: float = 0.0
+    escrow_count: int = 0
+    failed_escrow_ids: list[str] = field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Negotiation transcript models
 # ---------------------------------------------------------------------------
