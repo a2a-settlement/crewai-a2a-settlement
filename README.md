@@ -1,5 +1,8 @@
 # crewai-a2a-settlement
 
+[![CI](https://github.com/a2a-settlement/crewai-a2a-settlement/actions/workflows/ci.yml/badge.svg)](https://github.com/a2a-settlement/crewai-a2a-settlement/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/a2a-settlement/crewai-a2a-settlement/graph/badge.svg)](https://codecov.io/gh/a2a-settlement/crewai-a2a-settlement)
+
 Bridge [CrewAI](https://github.com/crewAIInc/crewAI) multi-agent orchestration with the **A2A Settlement Exchange** — enabling AI agents to automatically pay each other in tokens for completed tasks using escrow-based settlement.
 
 ## How It Works
@@ -68,8 +71,8 @@ print(summary)
 
 | Env Variable | Default | Description |
 |---|---|---|
-| `A2ASE_API_KEY` | *(required)* | API key from [sandbox.a2a-se.dev](https://sandbox.a2a-se.dev) |
-| `A2ASE_EXCHANGE_URL` | `https://sandbox.a2a-se.dev` | Exchange base URL |
+| `A2ASE_API_KEY` | *(required)* | API key from [sandbox.a2a-settlement.org](https://sandbox.a2a-settlement.org) |
+| `A2ASE_EXCHANGE_URL` | `https://sandbox.a2a-settlement.org` | Exchange base URL |
 | `A2ASE_NETWORK` | `sandbox` | `sandbox`, `devnet`, or `mainnet` |
 | `A2ASE_TIMEOUT` | `30` | HTTP timeout in seconds |
 | `A2ASE_AUTO_REGISTER` | `true` | Auto-register agents at crew kickoff |
@@ -79,7 +82,7 @@ Or pass values directly:
 ```python
 config = A2AConfig(
     api_key="sk-...",
-    exchange_url="https://sandbox.a2a-se.dev",
+    exchange_url="https://sandbox.a2a-settlement.org",
     network="sandbox",
     timeout_seconds=30,
 )
