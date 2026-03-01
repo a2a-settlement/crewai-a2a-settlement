@@ -32,18 +32,16 @@ from __future__ import annotations
 import threading
 import time
 import uuid
-from unittest.mock import MagicMock, Mock, call, patch
+from unittest.mock import Mock, patch
 
+import httpx
 import pytest
 
 # ---------------------------------------------------------------------------
 # We mock the HTTP layer entirely so no real exchange is needed.
 # All tests run fully offline.
 # ---------------------------------------------------------------------------
-
 # Patch httpx before importing our client so the client never touches the network
-import httpx
-
 from crewai_a2a_settlement.client import A2ASettlementClient, _truncate
 from crewai_a2a_settlement.config import A2AConfig
 from crewai_a2a_settlement.models import (
@@ -54,7 +52,6 @@ from crewai_a2a_settlement.models import (
     SessionSummary,
     SettlementError,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -384,7 +381,7 @@ class TestEscrowCreation:
         client.escrow("0xp", "0xq", 1.0, "t1", "d")
         client.escrow("0xp", "0xq", 1.0, "t2", "d")
 
-        keys = [call[1]["json"]["idempotency_key"] for call in http.post.call_args_list]
+        keys = [post_call[1]["json"]["idempotency_key"] for post_call in http.post.call_args_list]
         assert keys[0] != keys[1]
 
 
