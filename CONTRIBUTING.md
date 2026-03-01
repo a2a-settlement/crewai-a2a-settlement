@@ -22,19 +22,26 @@ This package bridges [CrewAI](https://github.com/crewAIInc/crewAI) with the [A2A
 Use a clean Python environment (venv/conda):
 
 ```bash
-pip install -e ".[dev]"
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
 ```
 
 ## Running tests
 
 ```bash
-pytest -q
+python -m pytest -q
 ```
 
 With coverage:
 
 ```bash
-pytest --cov=crewai_a2a_settlement --cov-report=term-missing -q
+python -m pytest --cov=crewai_a2a_settlement --cov-report=xml --cov-report=term-missing -q
+```
+
+CI-parity run (recommended before push):
+
+```bash
+./ci-local.sh
 ```
 
 ## Code style

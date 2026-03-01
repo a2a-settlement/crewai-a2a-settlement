@@ -14,4 +14,6 @@ dist/
 
 .ipynb_checkpoints/
 .coverage
+coverage.xml
+.tox/
 htmlcov/
