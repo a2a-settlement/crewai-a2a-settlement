@@ -1,1 +1,1 @@
-a2a-settlement @ git+https://github.com/a2a-settlement/a2a-settlement.git@main
+a2a-settlement-dev @ git+https://github.com/a2a-settlement/a2a-settlement.git@main
