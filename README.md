@@ -59,7 +59,7 @@ receipt = client.escrow(
 result = client.release(receipt.escrow_id)
 print(f"Released! tx_hash={result.tx_hash}")
 
-# Or on failure:
+# Or on failure (cancel = refund):
 # result = client.cancel(receipt.escrow_id, reason="Scraper timed out")
 
 # 5. Session summary
@@ -72,7 +72,7 @@ print(summary)
 | Env Variable | Default | Description |
 |---|---|---|
 | `A2ASE_API_KEY` | *(required)* | API key from [sandbox.a2a-settlement.org](https://sandbox.a2a-settlement.org) |
-| `A2ASE_EXCHANGE_URL` | `https://sandbox.a2a-settlement.org` | Exchange base URL |
+| `A2ASE_EXCHANGE_URL` | `https://sandbox.a2a-settlement.org` | Exchange base URL (no `/v1`) |
 | `A2ASE_NETWORK` | `sandbox` | `sandbox`, `devnet`, or `mainnet` |
 | `A2ASE_TIMEOUT` | `30` | HTTP timeout in seconds |
 | `A2ASE_AUTO_REGISTER` | `true` | Auto-register agents at crew kickoff |
@@ -120,6 +120,18 @@ The v0.1.0 test suite covers 64 tests across:
 | **v0.1.0** | SDK client layer — `A2ASettlementClient`, config, models, typed errors, retry logic, session summary |
 | **v0.2.0** | CrewAI integration — `SettledAgent`, `SettledTask`, `SettledCrew`, `EscrowStatus` enum, context manager escrow, sandbox utilities, thread safety, agent directory |
 | **v0.3.0** | PyPI publish, CI/CD, ecosystem templates (LangGraph, AutoGen) |
+
+## Related Projects
+
+| Project | Description |
+|---------|-------------|
+| [a2a-settlement](https://github.com/a2a-settlement/a2a-settlement) | Core exchange + SDK |
+| [a2a-settlement-mediator](https://github.com/a2a-settlement/a2a-settlement-mediator) | Dispute resolution — WORM pipeline ingests CrewAI transcripts |
+| [langgraph-a2a-settlement](https://github.com/a2a-settlement/langgraph-a2a-settlement) | LangGraph integration |
+| [litellm-a2a-settlement](https://github.com/a2a-settlement/litellm-a2a-settlement) | LiteLLM integration |
+| [adk-a2a-settlement](https://github.com/a2a-settlement/adk-a2a-settlement) | Google ADK integration |
+
+**Note:** `client.cancel()` refunds escrowed funds (same as `refund_escrow` in other integrations).
 
 ## License
 
