@@ -2,7 +2,12 @@
 config.py — Environment-driven configuration for crewai-a2a-settlement.
 
 All settings have defaults so a developer only needs to export
-A2ASE_API_KEY and A2ASE_NETWORK for a working sandbox setup.
+A2A_API_KEY for a working sandbox setup.
+
+Env var convention follows the ecosystem standard:
+    A2A_EXCHANGE_URL  — exchange base URL
+    A2A_API_KEY       — API key for the exchange
+Legacy A2ASE_ prefixed vars are still accepted for backwards compatibility.
 """
 
 import os
@@ -10,27 +15,27 @@ import os
 from pydantic import BaseModel, field_validator
 
 
+def _env(primary: str, legacy: str, default: str) -> str:
+    return os.getenv(primary) or os.getenv(legacy, default)
+
+
 class A2AConfig(BaseModel):
     """
     Configuration for the A2A Settlement Exchange client.
 
-    Reads from environment variables by default:
-        A2ASE_EXCHANGE_URL  — exchange base URL (default: sandbox)
-        A2ASE_API_KEY       — required, get at sandbox.a2a-settlement.org
-        A2ASE_NETWORK       — "sandbox" or "mainnet" (default: sandbox)
-        A2ASE_TIMEOUT       — HTTP timeout in seconds (default: 30)
-        A2ASE_AUTO_REGISTER — auto-register agents at kickoff (default: true)
-        A2ASE_BATCH_SETTLEMENTS — defer releases for batch flush (default: false)
+    Reads from environment variables:
+        A2A_EXCHANGE_URL (legacy: A2ASE_EXCHANGE_URL)
+        A2A_API_KEY      (legacy: A2ASE_API_KEY)
+        A2A_NETWORK      (legacy: A2ASE_NETWORK)
+        A2A_TIMEOUT      (legacy: A2ASE_TIMEOUT)
     """
 
-    exchange_url: str = os.getenv(
-        "A2ASE_EXCHANGE_URL", "https://sandbox.a2a-settlement.org"
-    )
-    api_key: str = os.getenv("A2ASE_API_KEY", "")
-    network: str = os.getenv("A2ASE_NETWORK", "sandbox")
-    timeout_seconds: int = int(os.getenv("A2ASE_TIMEOUT", "30"))
-    auto_register: bool = os.getenv("A2ASE_AUTO_REGISTER", "true").lower() == "true"
-    batch_settlements: bool = os.getenv("A2ASE_BATCH_SETTLEMENTS", "false").lower() == "true"
+    exchange_url: str = _env("A2A_EXCHANGE_URL", "A2ASE_EXCHANGE_URL", "https://sandbox.a2a-settlement.org")
+    api_key: str = _env("A2A_API_KEY", "A2ASE_API_KEY", "")
+    network: str = _env("A2A_NETWORK", "A2ASE_NETWORK", "sandbox")
+    timeout_seconds: int = int(_env("A2A_TIMEOUT", "A2ASE_TIMEOUT", "30"))
+    auto_register: bool = _env("A2A_AUTO_REGISTER", "A2ASE_AUTO_REGISTER", "true").lower() == "true"
+    batch_settlements: bool = _env("A2A_BATCH_SETTLEMENTS", "A2ASE_BATCH_SETTLEMENTS", "false").lower() == "true"
 
     @field_validator("network")
     @classmethod

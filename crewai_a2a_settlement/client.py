@@ -1,8 +1,8 @@
 """
 client.py — A2A-SE SDK wrapper for CrewAI integration
 
-Thin abstraction layer between crewai-a2a-settlement and the core
-A2A Settlement Exchange API. All network calls go through this class.
+Uses the official a2a-settlement SDK (SettlementExchangeClient) instead of
+raw httpx, ensuring API path compatibility with the core exchange.
 
 Design goals:
   - Singleton pattern so SettledCrew, SettledTask, and SettledAgent
@@ -21,6 +21,7 @@ import time
 from typing import Optional
 
 import httpx
+from a2a_settlement.client import SettlementExchangeClient
 
 from .config import A2AConfig
 from .models import BatchSettlementResult, EscrowReceipt, SessionSummary, SettlementResult
@@ -61,15 +62,6 @@ class A2ANetworkError(A2ASettlementError):
 # ---------------------------------------------------------------------------
 
 def _with_retries(fn, *, retries: int = 3, backoff: float = 1.0, label: str = ""):
-    """
-    Execute fn(), retrying up to `retries` times on transient network errors
-    or 5xx server errors. Raises A2ANetworkError if all attempts fail.
-
-    Retried: httpx transport errors AND A2ANetworkError (raised by _raise_for_status
-    for 5xx responses). Not retried: auth errors, validation errors, or any other
-    typed A2ASettlementError subclass — those indicate a problem with the request
-    itself, not a transient failure.
-    """
     last_exc = None
     for attempt in range(1, retries + 1):
         try:
@@ -96,16 +88,7 @@ class A2ASettlementClient:
     """
     Singleton client for the A2A Settlement Exchange.
 
-    Usage:
-        # In SettledCrew.kickoff():
-        client = A2ASettlementClient.initialize(config)
-
-        # In SettledTask.execute_sync():
-        client = A2ASettlementClient.get_instance()
-        receipt = client.escrow(...)
-        client.release(receipt.escrow_id)
-
-    Never instantiate directly — always use initialize() or get_instance().
+    Uses the official SettlementExchangeClient SDK for all exchange calls.
     """
 
     _instance: Optional["A2ASettlementClient"] = None
@@ -116,16 +99,10 @@ class A2ASettlementClient:
         http_client: Optional[httpx.Client] = None,
     ):
         self._config = config
-        self._http = http_client or httpx.Client(
+        self._sdk = SettlementExchangeClient(
             base_url=config.exchange_url,
-            headers={
-                "Authorization": f"Bearer {config.api_key}",
-                "Content-Type": "application/json",
-                "X-Client": "crewai-a2a-settlement/0.1.0",
-            },
-            timeout=config.timeout_seconds,
+            api_key=config.api_key,
         )
-        # Track every escrow created this session for the settlement summary
         self._session_receipts: list[EscrowReceipt] = []
         self._session_results: list[SettlementResult] = []
         self._pending_releases: list[str] = []
@@ -145,25 +122,17 @@ class A2ASettlementClient:
         config: Optional[A2AConfig] = None,
         http_client: Optional[httpx.Client] = None,
     ) -> "A2ASettlementClient":
-        """
-        Create (or recreate) the singleton client. Call once in SettledCrew.kickoff().
-        Pass http_client in tests to inject a mock transport.
-        """
         resolved_config = config or A2AConfig()
         if not resolved_config.api_key:
             raise A2AAuthError(
-                "A2ASE_API_KEY is not set. Export it or pass it via A2AConfig(api_key=...). "
-                "Get a sandbox key at https://sandbox.a2a-se.dev"
+                "A2A_API_KEY is not set. Export it or pass it via A2AConfig(api_key=...). "
+                "Get a sandbox key at https://sandbox.a2a-settlement.org"
             )
         cls._instance = cls(resolved_config, http_client=http_client)
         return cls._instance
 
     @classmethod
     def get_instance(cls) -> "A2ASettlementClient":
-        """
-        Return the active singleton. Raises if initialize() was never called.
-        This is intentional — SettledTask should never silently skip settlement.
-        """
         if cls._instance is None:
             raise A2ASettlementError(
                 "A2ASettlementClient not initialized. Use SettledCrew (not bare Crew) "
@@ -173,12 +142,6 @@ class A2ASettlementClient:
 
     @classmethod
     def _clear_instance(cls) -> None:
-        """Reset the singleton. Used in tests only — do not call in application code."""
-        if cls._instance and cls._instance._http:
-            try:
-                cls._instance._http.close()
-            except Exception:
-                pass
         cls._instance = None
 
     # ------------------------------------------------------------------
@@ -191,28 +154,15 @@ class A2ASettlementClient:
         capabilities: list[str],
         metadata: Optional[dict] = None,
     ) -> str:
-        """
-        Register an agent with the exchange and return its wallet address.
-
-        Args:
-            name:         Human-readable identifier (typically the agent's role).
-            capabilities: List of capability strings (typically the agent's goals).
-            metadata:     Optional dict of additional key-value metadata.
-
-        Returns:
-            wallet_address assigned by the exchange.
-        """
-        payload = {
-            "name": name,
-            "capabilities": capabilities,
-            "metadata": metadata or {},
-            "network": self._config.network,
-        }
-
         def _call():
-            resp = self._http.post("/v1/agents/register", json=payload)
-            _raise_for_status(resp, "register_agent")
-            return resp.json()
+            result = self._sdk.register_account(
+                bot_name=name,
+                developer_id=metadata.get("developer_id", "crewai") if metadata else "crewai",
+                developer_name=metadata.get("developer_name", "CrewAI Agent") if metadata else "CrewAI Agent",
+                contact_email=metadata.get("contact_email", "noreply@localhost") if metadata else "noreply@localhost",
+                skills=capabilities,
+            )
+            return result
 
         try:
             data = _with_retries(_call, label="register_agent")
@@ -223,9 +173,9 @@ class A2ASettlementClient:
                 f"Unexpected error registering agent '{name}': {exc}"
             ) from exc
 
-        wallet = data["wallet_address"]
-        logger.info("Agent registered: name=%s wallet=%s", name, wallet)
-        return wallet
+        account_id = data.get("account", {}).get("id", "")
+        logger.info("Agent registered: name=%s id=%s", name, account_id)
+        return account_id
 
     # ------------------------------------------------------------------
     # Escrow lifecycle
@@ -240,40 +190,27 @@ class A2ASettlementClient:
         description: str = "",
         idempotency_key: Optional[str] = None,
     ) -> EscrowReceipt:
-        """
-        Lock `amount` tokens from payer into escrow, earmarked for payee.
-
-        The idempotency_key defaults to task_id so retrying a failed
-        escrow call with the same task_id is safe — the exchange deduplicates.
-
-        Returns:
-            EscrowReceipt with escrow_id, amount, addresses, and timestamp.
-
-        Raises:
-            A2AEscrowError:   Insufficient balance, invalid address, etc.
-            A2AAuthError:     Invalid API key.
-            A2ANetworkError:  Exchange unreachable after retries.
-        """
-        key = idempotency_key or f"task-{task_id}"
-        payload = {
-            "payer_address": payer_address,
-            "payee_address": payee_address,
-            "amount": amount,
-            "task_id": task_id,
-            "description": description,
-            "idempotency_key": key,
-            "network": self._config.network,
-        }
-
         def _call():
-            resp = self._http.post("/v1/escrow", json=payload)
-            _raise_for_status(resp, "escrow")
-            return resp.json()
+            return self._sdk.create_escrow(
+                provider_id=payee_address,
+                amount=int(amount),
+                task_id=task_id,
+                task_type=description[:64] if description else "crewai-task",
+            )
 
         try:
             data = _with_retries(_call, label="escrow")
         except (A2ANetworkError, A2ASettlementError):
             raise
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            if status == 401:
+                raise A2AAuthError(f"[escrow] Unauthorized: {exc}") from exc
+            if status in (400, 402):
+                raise A2AEscrowError(f"[escrow] Failed: {exc}") from exc
+            if 500 <= status < 600:
+                raise A2ANetworkError(f"[escrow] Server error: {exc}") from exc
+            raise A2AEscrowError(f"[escrow] Unexpected error: {exc}") from exc
         except Exception as exc:
             raise A2AEscrowError(
                 f"Unexpected error creating escrow for task {task_id}: {exc}"
@@ -286,104 +223,49 @@ class A2ASettlementClient:
             payee_address=payee_address,
             amount=amount,
             status="escrowed",
-            created_at=data.get("created_at", ""),
+            created_at=str(data.get("expires_at", "")),
         )
         self._session_receipts.append(receipt)
-        logger.info(
-            "Escrow created: id=%s task=%s amount=%.4f",
-            receipt.escrow_id, task_id, amount,
-        )
+        logger.info("Escrow created: id=%s task=%s amount=%.4f", receipt.escrow_id, task_id, amount)
         return receipt
 
     def release(self, escrow_id: str) -> SettlementResult:
-        """
-        Release escrowed funds to the payee. Call this on task success.
-
-        When ``batch_settlements`` is enabled in config, the release is
-        deferred to a pending bucket and a placeholder result with
-        status ``"deferred"`` is returned. Call :meth:`flush_settlements`
-        to execute all pending releases in a single batch transaction.
-
-        Returns:
-            SettlementResult with tx_hash confirming the transfer, or a
-            deferred placeholder when batching is active.
-
-        Raises:
-            A2AReleaseError:  Escrow not found, already settled, etc.
-            A2ANetworkError:  Exchange unreachable after retries.
-        """
         if self._config.batch_settlements:
             self.defer_release(escrow_id)
-            return SettlementResult(
-                escrow_id=escrow_id,
-                status="deferred",
-                tx_hash="",
-                settled_at="",
-            )
+            return SettlementResult(escrow_id=escrow_id, status="deferred", tx_hash="", settled_at="")
 
         def _call():
-            resp = self._http.post(f"/v1/escrow/{escrow_id}/release")
-            _raise_for_status(resp, "release", validation_error_class=A2AReleaseError)
-            return resp.json()
+            return self._sdk.release_escrow(escrow_id=escrow_id)
 
         try:
             data = _with_retries(_call, label="release")
         except (A2ANetworkError, A2ASettlementError):
             raise
         except Exception as exc:
-            raise A2AReleaseError(
-                f"Unexpected error releasing escrow {escrow_id}: {exc}"
-            ) from exc
+            raise A2AReleaseError(f"Unexpected error releasing escrow {escrow_id}: {exc}") from exc
 
         result = SettlementResult(
             escrow_id=escrow_id,
             status="released",
-            tx_hash=data.get("tx_hash", ""),
-            settled_at=data.get("settled_at", ""),
+            tx_hash="",
+            settled_at="",
         )
         self._session_results.append(result)
-        logger.info("Escrow released: id=%s tx=%s", escrow_id, result.tx_hash)
+        logger.info("Escrow released: id=%s", escrow_id)
         return result
 
     def cancel(self, escrow_id: str, reason: str = "") -> SettlementResult:
-        """
-        Cancel escrow and return funds to payer. Call this on task failure.
-
-        Args:
-            escrow_id: The escrow to cancel.
-            reason:    Optional string logged in the exchange audit trail.
-
-        Returns:
-            SettlementResult confirming the cancellation.
-
-        Raises:
-            A2AReleaseError:  Escrow not found, already settled, etc.
-            A2ANetworkError:  Exchange unreachable after retries.
-        """
-        payload = {"reason": reason} if reason else {}
-
         def _call():
-            resp = self._http.post(
-                f"/v1/escrow/{escrow_id}/cancel", json=payload
-            )
-            _raise_for_status(resp, "cancel", validation_error_class=A2AReleaseError)
-            return resp.json()
+            return self._sdk.refund_escrow(escrow_id=escrow_id, reason=reason)
 
         try:
-            data = _with_retries(_call, label="cancel")
+            _with_retries(_call, label="cancel")
         except (A2ANetworkError, A2ASettlementError):
             raise
         except Exception as exc:
-            raise A2AReleaseError(
-                f"Unexpected error cancelling escrow {escrow_id}: {exc}"
-            ) from exc
+            raise A2AReleaseError(f"Unexpected error cancelling escrow {escrow_id}: {exc}") from exc
 
-        result = SettlementResult(
-            escrow_id=escrow_id,
-            status="cancelled",
-            tx_hash=data.get("tx_hash", ""),
-            settled_at=data.get("settled_at", ""),
-        )
+        result = SettlementResult(escrow_id=escrow_id, status="cancelled", tx_hash="", settled_at="")
         self._session_results.append(result)
         logger.info("Escrow cancelled: id=%s reason=%s", escrow_id, reason or "(none)")
         return result
@@ -393,89 +275,44 @@ class A2ASettlementClient:
     # ------------------------------------------------------------------
 
     def defer_release(self, escrow_id: str) -> None:
-        """
-        Add an escrow to the pending-release bucket without calling the
-        exchange. Use :meth:`flush_settlements` to release them all in
-        one batch transaction.
-        """
         self._pending_releases.append(escrow_id)
         logger.info("Escrow deferred for batch release: id=%s", escrow_id)
 
     def flush_settlements(self) -> BatchSettlementResult:
-        """
-        Release all pending escrows in a single batch API call.
-
-        Returns an empty :class:`BatchSettlementResult` (no API call)
-        when the pending bucket is empty.
-
-        Raises:
-            A2AReleaseError:  Batch release rejected by the exchange.
-            A2ANetworkError:  Exchange unreachable after retries.
-        """
         if not self._pending_releases:
             return BatchSettlementResult()
 
         escrow_ids = list(self._pending_releases)
-        payload = {"escrow_ids": escrow_ids}
-
-        def _call():
-            resp = self._http.post("/v1/escrow/batch-release", json=payload)
-            _raise_for_status(resp, "batch-release", validation_error_class=A2AReleaseError)
-            return resp.json()
-
-        try:
-            data = _with_retries(_call, label="batch-release")
-        except (A2ANetworkError, A2ASettlementError):
-            raise
-        except Exception as exc:
-            raise A2AReleaseError(
-                f"Unexpected error in batch release: {exc}"
-            ) from exc
-
-        failed_ids = set(data.get("failed_escrow_ids", []))
-        batch_tx_hash = data.get("batch_tx_hash", "")
-        settled_at = data.get("settled_at", "")
         results: list[SettlementResult] = []
-
-        receipt_amounts = {r.escrow_id: r.amount for r in self._session_receipts}
+        failed_ids: list[str] = []
 
         for eid in escrow_ids:
-            if eid in failed_ids:
-                continue
-            result = SettlementResult(
-                escrow_id=eid,
-                status="released",
-                tx_hash=batch_tx_hash,
-                settled_at=settled_at,
-            )
-            results.append(result)
-            self._session_results.append(result)
+            try:
+                self._sdk.release_escrow(escrow_id=eid)
+                result = SettlementResult(escrow_id=eid, status="released", tx_hash="", settled_at="")
+                results.append(result)
+                self._session_results.append(result)
+            except Exception as exc:
+                logger.warning("Batch release failed for %s: %s", eid, exc)
+                failed_ids.append(eid)
 
+        receipt_amounts = {r.escrow_id: r.amount for r in self._session_receipts}
         total_released = sum(receipt_amounts.get(r.escrow_id, 0.0) for r in results)
-
         self._pending_releases.clear()
 
-        batch_result = BatchSettlementResult(
+        return BatchSettlementResult(
             results=results,
-            batch_tx_hash=batch_tx_hash,
-            settled_at=settled_at,
+            batch_tx_hash="",
+            settled_at="",
             total_released=total_released,
             escrow_count=len(results),
-            failed_escrow_ids=list(failed_ids),
+            failed_escrow_ids=failed_ids,
         )
-
-        logger.info(
-            "Batch settlement complete: released=%d failed=%d tx=%s",
-            len(results), len(failed_ids), batch_tx_hash,
-        )
-        return batch_result
 
     def get_pending_count(self) -> int:
-        """Return the number of escrows awaiting batch release."""
         return len(self._pending_releases)
 
     def get_pending_escrow_ids(self) -> list[str]:
-        """Return a copy of the pending-release escrow IDs."""
         return list(self._pending_releases)
 
     # ------------------------------------------------------------------
@@ -483,45 +320,19 @@ class A2ASettlementClient:
     # ------------------------------------------------------------------
 
     def get_escrow_status(self, escrow_id: str) -> dict:
-        """
-        Poll the exchange for the current status of an escrow.
-        Useful for dashboards, the sandbox demo UI, or dispute workflows.
-        """
-
         def _call():
-            resp = self._http.get(f"/v1/escrow/{escrow_id}")
-            _raise_for_status(resp, "get_escrow_status")
-            return resp.json()
-
+            return self._sdk.get_escrow(escrow_id=escrow_id)
         return _with_retries(_call, label="get_escrow_status")
 
     def get_balance(self, wallet_address: str) -> float:
-        """Return the available (non-escrowed) token balance for a wallet address."""
-
         def _call():
-            resp = self._http.get(f"/v1/accounts/{wallet_address}/balance")
-            _raise_for_status(resp, "get_balance")
-            return resp.json()
-
+            return self._sdk.get_balance()
         data = _with_retries(_call, label="get_balance")
-        return float(data.get("available_balance", 0.0))
+        return float(data.get("available", 0))
 
-    def get_account_history(
-        self,
-        wallet_address: str,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> list[dict]:
-        """Return paginated transaction history for a wallet address."""
-
+    def get_account_history(self, wallet_address: str, limit: int = 50, offset: int = 0) -> list[dict]:
         def _call():
-            resp = self._http.get(
-                f"/v1/accounts/{wallet_address}/history",
-                params={"limit": limit, "offset": offset},
-            )
-            _raise_for_status(resp, "get_account_history")
-            return resp.json()
-
+            return self._sdk.get_transactions(limit=limit, offset=offset)
         data = _with_retries(_call, label="get_account_history")
         return data.get("transactions", [])
 
@@ -530,21 +341,9 @@ class A2ASettlementClient:
     # ------------------------------------------------------------------
 
     def get_session_receipts(self) -> SessionSummary:
-        """
-        Return aggregated settlement data for the entire SettledCrew session.
-        Called by SettledCrew.kickoff() and attached to CrewOutput.
-        """
-        released_ids = {
-            s.escrow_id for s in self._session_results if s.status == "released"
-        }
-        total_released = sum(
-            r.amount
-            for r in self._session_receipts
-            if r.escrow_id in released_ids
-        )
-        cancelled_count = sum(
-            1 for s in self._session_results if s.status == "cancelled"
-        )
+        released_ids = {s.escrow_id for s in self._session_results if s.status == "released"}
+        total_released = sum(r.amount for r in self._session_receipts if r.escrow_id in released_ids)
+        cancelled_count = sum(1 for s in self._session_results if s.status == "cancelled")
         total_escrowed = sum(r.amount for r in self._session_receipts)
 
         return SessionSummary(
@@ -564,57 +363,4 @@ class A2ASettlementClient:
         return self
 
     def __exit__(self, *args):
-        self._http.close()
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-def _raise_for_status(
-    resp: httpx.Response,
-    operation: str,
-    validation_error_class: type = None,
-) -> None:
-    """
-    Translate HTTP error codes into typed A2A-SE exceptions.
-
-    Exchange error responses are expected to be JSON:
-      {"error": "...", "code": "...", "detail": "..."}
-
-    Args:
-        resp:                   The httpx response to inspect.
-        operation:              Name of the operation (for error messages).
-        validation_error_class: Exception class to raise for 422 responses.
-                                Defaults to A2AEscrowError. Pass A2AReleaseError
-                                for release/cancel operations so callers get the
-                                correct typed exception.
-    """
-    if resp.is_success:
-        return
-
-    try:
-        body = resp.json()
-        message = body.get("error") or body.get("detail") or resp.text
-    except Exception:
-        message = resp.text
-
-    status = resp.status_code
-    _422_class = validation_error_class or A2AEscrowError
-
-    if status == 401:
-        raise A2AAuthError(f"[{operation}] Unauthorized: {message}")
-    if status == 402:
-        raise A2AEscrowError(f"[{operation}] Insufficient balance: {message}")
-    if status == 404:
-        raise A2ASettlementError(f"[{operation}] Not found: {message}")
-    if status == 409:
-        # Idempotency collision — exchange already processed this request, safe to continue
-        logger.warning("[%s] Idempotency collision (409): %s", operation, message)
-        return
-    if status == 422:
-        raise _422_class(f"[{operation}] Validation error: {message}")
-    if 500 <= status < 600:
-        raise A2ANetworkError(f"[{operation}] Server error {status}: {message}")
-
-    raise A2ASettlementError(f"[{operation}] Unexpected {status}: {message}")
+        pass
