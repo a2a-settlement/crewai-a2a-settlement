@@ -11,7 +11,6 @@ Design goals:
     don't need to inspect raw HTTP responses
   - Retry logic built in for transient failures (escrow operations
     are idempotent with the same task_id / idempotency_key)
-  - Pluggable transport for testing (inject a mock httpx.Client)
 """
 
 from __future__ import annotations
@@ -93,15 +92,12 @@ class A2ASettlementClient:
 
     _instance: Optional["A2ASettlementClient"] = None
 
-    def __init__(
-        self,
-        config: A2AConfig,
-        http_client: Optional[httpx.Client] = None,
-    ):
+    def __init__(self, config: A2AConfig):
         self._config = config
         self._sdk = SettlementExchangeClient(
             base_url=config.exchange_url,
             api_key=config.api_key,
+            timeout_s=float(config.timeout_seconds),
         )
         self._session_receipts: list[EscrowReceipt] = []
         self._session_results: list[SettlementResult] = []
@@ -120,7 +116,6 @@ class A2ASettlementClient:
     def initialize(
         cls,
         config: Optional[A2AConfig] = None,
-        http_client: Optional[httpx.Client] = None,
     ) -> "A2ASettlementClient":
         resolved_config = config or A2AConfig()
         if not resolved_config.api_key:
@@ -128,7 +123,7 @@ class A2ASettlementClient:
                 "A2A_API_KEY is not set. Export it or pass it via A2AConfig(api_key=...). "
                 "Get a sandbox key at https://sandbox.a2a-settlement.org"
             )
-        cls._instance = cls(resolved_config, http_client=http_client)
+        cls._instance = cls(resolved_config)
         return cls._instance
 
     @classmethod
@@ -196,6 +191,7 @@ class A2ASettlementClient:
                 amount=int(amount),
                 task_id=task_id,
                 task_type=description[:64] if description else "crewai-task",
+                idempotency_key=idempotency_key,
             )
 
         try:
@@ -223,7 +219,7 @@ class A2ASettlementClient:
             payee_address=payee_address,
             amount=amount,
             status="escrowed",
-            created_at=str(data.get("expires_at", "")),
+            expires_at=str(data.get("expires_at", "")),
         )
         self._session_receipts.append(receipt)
         logger.info("Escrow created: id=%s task=%s amount=%.4f", receipt.escrow_id, task_id, amount)
@@ -324,13 +320,13 @@ class A2ASettlementClient:
             return self._sdk.get_escrow(escrow_id=escrow_id)
         return _with_retries(_call, label="get_escrow_status")
 
-    def get_balance(self, wallet_address: str) -> float:
+    def get_balance(self) -> float:
         def _call():
             return self._sdk.get_balance()
         data = _with_retries(_call, label="get_balance")
         return float(data.get("available", 0))
 
-    def get_account_history(self, wallet_address: str, limit: int = 50, offset: int = 0) -> list[dict]:
+    def get_account_history(self, limit: int = 50, offset: int = 0) -> list[dict]:
         def _call():
             return self._sdk.get_transactions(limit=limit, offset=offset)
         data = _with_retries(_call, label="get_account_history")
@@ -342,8 +338,9 @@ class A2ASettlementClient:
 
     def get_session_receipts(self) -> SessionSummary:
         released_ids = {s.escrow_id for s in self._session_results if s.status == "released"}
+        cancelled_ids = {s.escrow_id for s in self._session_results if s.status == "cancelled"}
         total_released = sum(r.amount for r in self._session_receipts if r.escrow_id in released_ids)
-        cancelled_count = sum(1 for s in self._session_results if s.status == "cancelled")
+        total_cancelled = sum(r.amount for r in self._session_receipts if r.escrow_id in cancelled_ids)
         total_escrowed = sum(r.amount for r in self._session_receipts)
 
         return SessionSummary(
@@ -351,8 +348,8 @@ class A2ASettlementClient:
             results=list(self._session_results),
             total_escrowed=total_escrowed,
             total_released=total_released,
-            total_cancelled=total_escrowed - total_released,
-            cancelled_count=cancelled_count,
+            total_cancelled=total_cancelled,
+            cancelled_count=len(cancelled_ids),
         )
 
     # ------------------------------------------------------------------

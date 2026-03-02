@@ -144,6 +144,14 @@ def validate_no_execution_authority(
                 f"Entry {idx} by '{entry.speaker}' contains forbidden phrase "
                 f"'{match.group()}'. Agents must not claim execution authority."
             )
+        if entry.metadata:
+            meta_str = json.dumps(entry.metadata)
+            match = _FORBIDDEN_PATTERN.search(meta_str)
+            if match:
+                raise TranscriptValidationError(
+                    f"Entry {idx} metadata by '{entry.speaker}' contains forbidden phrase "
+                    f"'{match.group()}'. Agents must not claim execution authority."
+                )
 
     compromise_str = json.dumps(compromise)
     match = _FORBIDDEN_PATTERN.search(compromise_str)

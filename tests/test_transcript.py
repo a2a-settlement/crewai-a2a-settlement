@@ -301,7 +301,5 @@ class TestNoSettlementApprovedOutput:
                 metadata={"internal_note": "Settlement Approved"},
             ),
         ]
-        # metadata isn't scanned by validate_no_execution_authority
-        # (it's an opaque passthrough), but the canonical JSON is clean
-        t = build_transcript(entries, sample_compromise)
-        assert isinstance(t.transcript_hash, str)
+        with pytest.raises(TranscriptValidationError, match="metadata"):
+            build_transcript(entries, sample_compromise)

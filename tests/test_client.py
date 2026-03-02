@@ -430,7 +430,7 @@ class TestAccountQueries:
         client._sdk = MagicMock()
         client._sdk.get_balance.return_value = BALANCE_OK
 
-        balance = client.get_balance("0xWALLET")
+        balance = client.get_balance()
         assert balance == 100.0
         assert isinstance(balance, float)
 
@@ -439,7 +439,7 @@ class TestAccountQueries:
         client._sdk = MagicMock()
         client._sdk.get_balance.return_value = {}
 
-        balance = client.get_balance("0xWALLET")
+        balance = client.get_balance()
         assert balance == 0.0
 
     def test_get_account_history(self):
@@ -447,7 +447,7 @@ class TestAccountQueries:
         client._sdk = MagicMock()
         client._sdk.get_transactions.return_value = HISTORY_OK
 
-        history = client.get_account_history("0xWALLET")
+        history = client.get_account_history()
         assert len(history) == 1
         assert history[0]["id"] == "tx-1"
 

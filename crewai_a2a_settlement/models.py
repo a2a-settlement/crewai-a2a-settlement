@@ -31,7 +31,7 @@ class EscrowReceipt:
     payee_address: str
     amount: float
     status: str          # "escrowed" | "released" | "cancelled"
-    created_at: str
+    expires_at: str
 
 
 @dataclass
