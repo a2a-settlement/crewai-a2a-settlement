@@ -45,6 +45,9 @@ Homepage = "https://github.com/a2a-settlement/crewai-a2a-settlement"
 Repository = "https://github.com/a2a-settlement/crewai-a2a-settlement"
 Issues = "https://github.com/a2a-settlement/crewai-a2a-settlement/issues"
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --tb=short"
