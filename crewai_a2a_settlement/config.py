@@ -35,7 +35,9 @@ class A2AConfig(BaseModel):
     network: str = _env("A2A_NETWORK", "A2ASE_NETWORK", "sandbox")
     timeout_seconds: int = int(_env("A2A_TIMEOUT", "A2ASE_TIMEOUT", "30"))
     auto_register: bool = _env("A2A_AUTO_REGISTER", "A2ASE_AUTO_REGISTER", "true").lower() == "true"
-    batch_settlements: bool = _env("A2A_BATCH_SETTLEMENTS", "A2ASE_BATCH_SETTLEMENTS", "false").lower() == "true"
+    batch_settlements: bool = (
+        _env("A2A_BATCH_SETTLEMENTS", "A2ASE_BATCH_SETTLEMENTS", "false").lower() == "true"
+    )
 
     @field_validator("network")
     @classmethod

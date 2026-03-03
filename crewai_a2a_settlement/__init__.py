@@ -46,6 +46,14 @@ from .models import (
     SessionSummary,
     SettlementResult,
 )
+from .shim_client import (
+    ProxyResult,
+    ShimClient,
+    ShimError,
+    ShimEscrowDepletedError,
+    ShimNotConfiguredError,
+    ShimProxyError,
+)
 from .transcript import (
     TranscriptIntegrityError,
     TranscriptValidationError,
@@ -53,14 +61,6 @@ from .transcript import (
     hash_transcript,
     validate_no_execution_authority,
     verify_transcript,
-)
-from .shim_client import (
-    ShimClient,
-    ShimError,
-    ShimNotConfiguredError,
-    ShimEscrowDepletedError,
-    ShimProxyError,
-    ProxyResult,
 )
 
 __all__ = [

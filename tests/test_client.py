@@ -21,7 +21,7 @@ Run with:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
@@ -30,13 +30,11 @@ from crewai_a2a_settlement.client import (
     A2AAuthError,
     A2AEscrowError,
     A2ANetworkError,
-    A2AReleaseError,
     A2ASettlementClient,
     A2ASettlementError,
     _with_retries,
 )
 from crewai_a2a_settlement.config import A2AConfig
-
 
 # ---------------------------------------------------------------------------
 # Fixtures and helpers
@@ -311,7 +309,9 @@ class TestCancel:
 
         result = client.cancel("esc-001", reason="Task raised exception")
         assert result.status == "cancelled"
-        client._sdk.refund_escrow.assert_called_once_with(escrow_id="esc-001", reason="Task raised exception")
+        client._sdk.refund_escrow.assert_called_once_with(
+            escrow_id="esc-001", reason="Task raised exception"
+        )
 
     def test_cancel_added_to_session_results(self):
         client = _make_client()
@@ -454,7 +454,9 @@ class TestAccountQueries:
     def test_get_escrow_status(self):
         client = _make_client()
         client._sdk = MagicMock()
-        client._sdk.get_escrow.return_value = {"escrow_id": "esc-001", "status": "held", "amount": 5}
+        client._sdk.get_escrow.return_value = {
+            "escrow_id": "esc-001", "status": "held", "amount": 5
+        }
 
         status = client.get_escrow_status("esc-001")
         assert status["status"] == "held"

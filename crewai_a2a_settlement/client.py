@@ -153,8 +153,16 @@ class A2ASettlementClient:
             result = self._sdk.register_account(
                 bot_name=name,
                 developer_id=metadata.get("developer_id", "crewai") if metadata else "crewai",
-                developer_name=metadata.get("developer_name", "CrewAI Agent") if metadata else "CrewAI Agent",
-                contact_email=metadata.get("contact_email", "noreply@localhost") if metadata else "noreply@localhost",
+                developer_name=(
+                    metadata.get("developer_name", "CrewAI Agent")
+                    if metadata
+                    else "CrewAI Agent"
+                ),
+                contact_email=(
+                    metadata.get("contact_email", "noreply@localhost")
+                    if metadata
+                    else "noreply@localhost"
+                ),
                 skills=capabilities,
             )
             return result
@@ -228,13 +236,15 @@ class A2ASettlementClient:
     def release(self, escrow_id: str) -> SettlementResult:
         if self._config.batch_settlements:
             self.defer_release(escrow_id)
-            return SettlementResult(escrow_id=escrow_id, status="deferred", tx_hash="", settled_at="")
+            return SettlementResult(
+                escrow_id=escrow_id, status="deferred", tx_hash="", settled_at=""
+            )
 
         def _call():
             return self._sdk.release_escrow(escrow_id=escrow_id)
 
         try:
-            data = _with_retries(_call, label="release")
+            _with_retries(_call, label="release")
         except (A2ANetworkError, A2ASettlementError):
             raise
         except Exception as exc:
@@ -261,7 +271,9 @@ class A2ASettlementClient:
         except Exception as exc:
             raise A2AReleaseError(f"Unexpected error cancelling escrow {escrow_id}: {exc}") from exc
 
-        result = SettlementResult(escrow_id=escrow_id, status="cancelled", tx_hash="", settled_at="")
+        result = SettlementResult(
+            escrow_id=escrow_id, status="cancelled", tx_hash="", settled_at=""
+        )
         self._session_results.append(result)
         logger.info("Escrow cancelled: id=%s reason=%s", escrow_id, reason or "(none)")
         return result
@@ -285,7 +297,9 @@ class A2ASettlementClient:
         for eid in escrow_ids:
             try:
                 self._sdk.release_escrow(escrow_id=eid)
-                result = SettlementResult(escrow_id=eid, status="released", tx_hash="", settled_at="")
+                result = SettlementResult(
+                    escrow_id=eid, status="released", tx_hash="", settled_at=""
+                )
                 results.append(result)
                 self._session_results.append(result)
             except Exception as exc:
@@ -339,8 +353,12 @@ class A2ASettlementClient:
     def get_session_receipts(self) -> SessionSummary:
         released_ids = {s.escrow_id for s in self._session_results if s.status == "released"}
         cancelled_ids = {s.escrow_id for s in self._session_results if s.status == "cancelled"}
-        total_released = sum(r.amount for r in self._session_receipts if r.escrow_id in released_ids)
-        total_cancelled = sum(r.amount for r in self._session_receipts if r.escrow_id in cancelled_ids)
+        total_released = sum(
+            r.amount for r in self._session_receipts if r.escrow_id in released_ids
+        )
+        total_cancelled = sum(
+            r.amount for r in self._session_receipts if r.escrow_id in cancelled_ids
+        )
         total_escrowed = sum(r.amount for r in self._session_receipts)
 
         return SessionSummary(

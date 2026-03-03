@@ -23,8 +23,6 @@ from typing import Optional
 
 import httpx
 
-from .config import A2AConfig
-
 logger = logging.getLogger("crewai_a2a_settlement.shim")
 
 
