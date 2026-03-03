@@ -54,6 +54,14 @@ from .transcript import (
     validate_no_execution_authority,
     verify_transcript,
 )
+from .shim_client import (
+    ShimClient,
+    ShimError,
+    ShimNotConfiguredError,
+    ShimEscrowDepletedError,
+    ShimProxyError,
+    ProxyResult,
+)
 
 __all__ = [
     "__version__",
@@ -78,4 +86,11 @@ __all__ = [
     "validate_no_execution_authority",
     "TranscriptValidationError",
     "TranscriptIntegrityError",
+    # Shim (Economic Air Gap)
+    "ShimClient",
+    "ShimError",
+    "ShimNotConfiguredError",
+    "ShimEscrowDepletedError",
+    "ShimProxyError",
+    "ProxyResult",
 ]
