@@ -32,6 +32,7 @@ logger = logging.getLogger("crewai_a2a_settlement.client")
 # Exceptions
 # ---------------------------------------------------------------------------
 
+
 class A2ASettlementError(Exception):
     """Base exception for all A2A-SE client errors."""
 
@@ -60,6 +61,7 @@ class A2ANetworkError(A2ASettlementError):
 # Internal retry helper
 # ---------------------------------------------------------------------------
 
+
 def _with_retries(fn, *, retries: int = 3, backoff: float = 1.0, label: str = ""):
     last_exc = None
     for attempt in range(1, retries + 1):
@@ -70,18 +72,21 @@ def _with_retries(fn, *, retries: int = 3, backoff: float = 1.0, label: str = ""
             wait = backoff * (2 ** (attempt - 1))
             logger.warning(
                 "A2A-SE %s: retriable error on attempt %d/%d, retrying in %.1fs: %s",
-                label, attempt, retries, wait, exc,
+                label,
+                attempt,
+                retries,
+                wait,
+                exc,
             )
             if attempt < retries:
                 time.sleep(wait)
-    raise A2ANetworkError(
-        f"{label} failed after {retries} attempts: {last_exc}"
-    ) from last_exc
+    raise A2ANetworkError(f"{label} failed after {retries} attempts: {last_exc}") from last_exc
 
 
 # ---------------------------------------------------------------------------
 # Main client
 # ---------------------------------------------------------------------------
+
 
 class A2ASettlementClient:
     """
@@ -154,9 +159,7 @@ class A2ASettlementClient:
                 bot_name=name,
                 developer_id=metadata.get("developer_id", "crewai") if metadata else "crewai",
                 developer_name=(
-                    metadata.get("developer_name", "CrewAI Agent")
-                    if metadata
-                    else "CrewAI Agent"
+                    metadata.get("developer_name", "CrewAI Agent") if metadata else "CrewAI Agent"
                 ),
                 contact_email=(
                     metadata.get("contact_email", "noreply@localhost")
@@ -192,6 +195,7 @@ class A2ASettlementClient:
         task_id: str,
         description: str = "",
         idempotency_key: Optional[str] = None,
+        required_attestation_level: Optional[str] = None,
     ) -> EscrowReceipt:
         def _call():
             return self._sdk.create_escrow(
@@ -200,6 +204,7 @@ class A2ASettlementClient:
                 task_id=task_id,
                 task_type=description[:64] if description else "crewai-task",
                 idempotency_key=idempotency_key,
+                required_attestation_level=required_attestation_level,
             )
 
         try:
@@ -232,6 +237,33 @@ class A2ASettlementClient:
         self._session_receipts.append(receipt)
         logger.info("Escrow created: id=%s task=%s amount=%.4f", receipt.escrow_id, task_id, amount)
         return receipt
+
+    def deliver(
+        self,
+        escrow_id: str,
+        content: str,
+        provenance: Optional[dict] = None,
+    ) -> dict:
+        """Submit a deliverable (with optional provenance) against a held escrow.
+
+        Call this after the worker agent completes its task, before release.
+        """
+
+        def _call():
+            return self._sdk.deliver(
+                escrow_id=escrow_id,
+                content=content,
+                provenance=provenance,
+            )
+
+        try:
+            return _with_retries(_call, label="deliver")
+        except (A2ANetworkError, A2ASettlementError):
+            raise
+        except Exception as exc:
+            raise A2AEscrowError(
+                f"Unexpected error delivering to escrow {escrow_id}: {exc}"
+            ) from exc
 
     def release(self, escrow_id: str) -> SettlementResult:
         if self._config.batch_settlements:
@@ -332,17 +364,20 @@ class A2ASettlementClient:
     def get_escrow_status(self, escrow_id: str) -> dict:
         def _call():
             return self._sdk.get_escrow(escrow_id=escrow_id)
+
         return _with_retries(_call, label="get_escrow_status")
 
     def get_balance(self) -> float:
         def _call():
             return self._sdk.get_balance()
+
         data = _with_retries(_call, label="get_balance")
         return float(data.get("available", 0))
 
     def get_account_history(self, limit: int = 50, offset: int = 0) -> list[dict]:
         def _call():
             return self._sdk.get_transactions(limit=limit, offset=offset)
+
         data = _with_retries(_call, label="get_account_history")
         return data.get("transactions", [])
 
