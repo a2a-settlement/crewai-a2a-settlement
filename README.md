@@ -1,5 +1,7 @@
 # crewai-a2a-settlement
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://python.org)
 [![CI](https://github.com/a2a-settlement/crewai-a2a-settlement/actions/workflows/ci.yml/badge.svg)](https://github.com/a2a-settlement/crewai-a2a-settlement/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/a2a-settlement/crewai-a2a-settlement/graph/badge.svg)](https://codecov.io/gh/a2a-settlement/crewai-a2a-settlement)
 
@@ -126,7 +128,13 @@ The v0.1.0 test suite covers 64 tests across:
 | Project | Description |
 |---------|-------------|
 | [a2a-settlement](https://github.com/a2a-settlement/a2a-settlement) | Core exchange + SDK |
+| [a2a-settlement-auth](https://github.com/a2a-settlement/a2a-settlement-auth) | OAuth economic authorization |
 | [a2a-settlement-mediator](https://github.com/a2a-settlement/a2a-settlement-mediator) | Dispute resolution — WORM pipeline ingests CrewAI transcripts |
+| [a2a-settlement-mcp](https://github.com/a2a-settlement/a2a-settlement-mcp) | MCP server for any client |
+| [settlebridge-ai](https://github.com/a2a-settlement/settlebridge-ai) | SettleBridge Gateway — trust/policy enforcement |
+| [mcp-trust-gateway](https://github.com/a2a-settlement/mcp-trust-gateway) | MCP trust layer above OAuth |
+| [otel-agent-provenance](https://github.com/a2a-settlement/otel-agent-provenance) | OpenTelemetry provenance conventions |
+| [a2a-federation-rfc](https://github.com/a2a-settlement/a2a-federation-rfc) | Federation protocol specification |
 | [langgraph-a2a-settlement](https://github.com/a2a-settlement/langgraph-a2a-settlement) | LangGraph integration |
 | [litellm-a2a-settlement](https://github.com/a2a-settlement/litellm-a2a-settlement) | LiteLLM integration |
 | [adk-a2a-settlement](https://github.com/a2a-settlement/adk-a2a-settlement) | Google ADK integration |
